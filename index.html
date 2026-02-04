@@ -1471,15 +1471,15 @@
              :key="index"
              :class="{ selected: item.selected }"
              @click="toggleHistorySelect(index)"
-             :title="item.fileName || item.name || ''">
+             :title="getDisplayName(item)">
           <!-- 图片文件显示缩略图 -->
-          <img v-if="isImageFile(item.fileName || item.name || item.url)" 
+          <img v-if="isImageFile(getDisplayName(item))" 
                :src="item.url" 
                @error="handleHistoryImgError($event, item)">
           <!-- 非图片文件显示图标 -->
-          <div v-else class="history-file-icon" :class="getFileIconClass(item.fileName || item.name || item.url)">
-            <i :class="getFileIcon(item.fileName || item.name || item.url)"></i>
-            <span class="file-ext">{{ getFileExt(item.fileName || item.name || item.url) }}</span>
+          <div v-else class="history-file-icon" :class="getFileIconClass(getDisplayName(item))">
+            <i :class="getFileIcon(getDisplayName(item))"></i>
+            <span class="file-ext">{{ getFileExt(getDisplayName(item)) }}</span>
           </div>
           <div class="history-item-overlay">
             <button class="action-btn" @click.stop="copyLink(item)" style="background: rgba(255,255,255,0.2); color: white;">
@@ -1963,7 +1963,8 @@
         downloadFile(file) {
           const link = document.createElement('a');
           link.href = file.url;
-          link.download = file.name;
+          // 使用安全的文件名获取方法
+          link.download = this.getDisplayName(file);
           link.click();
         },
 
@@ -1977,7 +1978,8 @@
 
         // 打开预览页面 - 使用统一媒体预览服务
         openPreview(file) {
-          const fileName = file.name || file.fileName;
+          // 使用安全的文件名获取方法
+          const fileName = this.getDisplayName(file);
           // file.url 已经是绝对直链（如 https://pan.katelya.eu.org/file/xxx.mp4）
           const fileUrl = file.url;
           const ext = fileName.split('.').pop().toLowerCase();
@@ -2054,6 +2056,28 @@
         removeFromHistory(index) {
           this.uploadHistory.splice(index, 1);
           this.saveHistory();
+        },
+
+        // 安全获取文件显示名称（避免显示 URL 或乱码）
+        getDisplayName(item) {
+          // 优先使用 fileName 或 name
+          const name = item.fileName || item.name;
+          
+          // 如果有有效的名称（不包含 :// 协议头）
+          if (name && !name.includes('://')) {
+            return name;
+          }
+          
+          // 尝试从 URL 提取文件名部分
+          if (item.url) {
+            const urlPath = item.url.split('/').pop().split('?')[0];
+            // 只有当提取的文件名合理时才使用（有扩展名且长度适中）
+            if (urlPath && urlPath.includes('.') && urlPath.length < 80) {
+              return urlPath;
+            }
+          }
+          
+          return '未知文件';
         },
 
         // 文件类型判断方法
@@ -2139,7 +2163,37 @@
           try {
             const history = localStorage.getItem('uploadHistory');
             if (history) {
-              this.uploadHistory = JSON.parse(history).map(h => ({ ...h, selected: false }));
+              // 迁移旧数据：确保每条记录都有正确的 fileName 字段
+              this.uploadHistory = JSON.parse(history).map(h => {
+                // 如果已有正确的 fileName/name，直接使用
+                if (h.fileName && !h.fileName.includes('://')) {
+                  return { ...h, selected: false };
+                }
+                if (h.name && !h.name.includes('://')) {
+                  return { ...h, fileName: h.name, selected: false };
+                }
+                
+                // 尝试从 URL 中提取文件 ID（如 /file/xxx.ext）
+                // 但这只是 fallback，实际显示应该显示 "未知文件"
+                let extractedName = '未知文件';
+                if (h.url) {
+                  const urlPath = h.url.split('/').pop().split('?')[0];
+                  // 如果 urlPath 看起来像正常文件名（有扩展名且不太长）
+                  if (urlPath && urlPath.includes('.') && urlPath.length < 100) {
+                    extractedName = urlPath;
+                  }
+                }
+                
+                return { 
+                  ...h, 
+                  fileName: extractedName,
+                  name: extractedName,
+                  selected: false 
+                };
+              });
+              
+              // 保存迁移后的数据
+              this.saveHistory();
             }
           } catch (e) {
             this.uploadHistory = [];

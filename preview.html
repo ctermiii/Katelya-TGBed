@@ -891,12 +891,15 @@
           const params = new URLSearchParams(window.location.search);
           const file = params.get('file') || params.get('f');
           
+          // 临时文件标识符（用于 API 查询）
+          let fileIdWithExt = '';
+          
           if (!file) {
             // 尝试从路径获取
             const path = window.location.pathname;
             if (path.startsWith('/file/')) {
               this.fileUrl = path;
-              this.fileName = path.split('/').pop();
+              fileIdWithExt = path.split('/').pop(); // 如: BQACAg...docx
             } else {
               this.loading = false;
               this.previewType = 'unsupported';
@@ -904,7 +907,25 @@
             }
           } else {
             this.fileUrl = file.startsWith('/') ? file : `/file/${file}`;
-            this.fileName = file.split('/').pop();
+            fileIdWithExt = file.split('/').pop();
+          }
+
+          // 从 API 获取原始文件名（metadata.fileName）
+          // 如果 API 返回原始文件名则使用，否则回退到 URL 中的 fileId
+          try {
+            const infoResponse = await fetch(`/api/file-info/${fileIdWithExt}`);
+            if (infoResponse.ok) {
+              const info = await infoResponse.json();
+              // 优先使用 API 返回的原始文件名
+              this.fileName = info.fileName || info.originalName || fileIdWithExt;
+              this.fileSize = info.fileSize || 0;
+            } else {
+              // API 失败，回退到 URL 解析
+              this.fileName = fileIdWithExt;
+            }
+          } catch (e) {
+            console.warn('Failed to fetch file info:', e);
+            this.fileName = fileIdWithExt;
           }
 
           // 获取文件扩展名
