@@ -82,7 +82,7 @@ export async function onRequestPost(context) {
     const contentType =
       response.headers.get("content-type") || "application/octet-stream";
 
-    // 获取文件内容
+    // 获取文件内容 - 只读取一次，后续传递这个 arrayBuffer
     const arrayBuffer = await response.arrayBuffer();
     const fileSize = arrayBuffer.byteLength;
 
@@ -127,8 +127,14 @@ export async function onRequestPost(context) {
 
     const fileExtension = fileName.split(".").pop().toLowerCase();
 
-    // 创建File对象
-    const file = new File([arrayBuffer], fileName, { type: contentType });
+    // 创建文件信息对象（不再创建 File 对象，避免 body 重复读取问题）
+    const fileInfo = {
+      arrayBuffer,
+      fileName,
+      fileExtension,
+      contentType,
+      size: fileSize,
+    };
 
     // 根据存储模式上传
     let result;
@@ -136,30 +142,25 @@ export async function onRequestPost(context) {
       if (!env.R2_BUCKET) {
         return errorResponse("R2 未配置或未启用，无法上传");
       }
-      result = await uploadToR2(file, fileName, fileExtension, env);
+      result = await uploadToR2(fileInfo, env);
     } else if (storageMode === "s3") {
       if (!env.S3_ENDPOINT || !env.S3_ACCESS_KEY_ID) {
         return errorResponse("S3 未配置，无法上传");
       }
-      result = await uploadToS3(file, fileName, fileExtension, env);
+      result = await uploadToS3(fileInfo, env);
     } else if (storageMode === "discord") {
       if (!env.DISCORD_WEBHOOK_URL && !env.DISCORD_BOT_TOKEN) {
         return errorResponse("Discord 未配置，无法上传");
       }
-      result = await uploadToDiscordStorage(file, fileName, fileExtension, env);
+      result = await uploadToDiscordStorage(fileInfo, env);
     } else if (storageMode === "huggingface") {
       if (!env.HF_TOKEN || !env.HF_REPO) {
         return errorResponse("HuggingFace 未配置，无法上传");
       }
-      result = await uploadToHFStorage(file, fileName, fileExtension, env);
+      result = await uploadToHFStorage(fileInfo, env);
     } else {
       // 默认上传到 Telegram
-      result = await uploadToTelegramStorage(
-        file,
-        fileName,
-        fileExtension,
-        env,
-      );
+      result = await uploadToTelegramStorage(fileInfo, env);
     }
 
     // 访客计数（仅成功时）
@@ -226,27 +227,28 @@ function getExtensionFromMimeType(mimeType) {
 }
 
 // --- Telegram 上传 ---
-async function uploadToTelegramStorage(
-  uploadFile,
-  fileName,
-  fileExtension,
-  env,
-) {
+async function uploadToTelegramStorage(fileInfo, env) {
+  const { arrayBuffer, fileName, fileExtension, contentType, size } = fileInfo;
+  
+  // 从 arrayBuffer 创建新的 Blob/File 用于上传
+  const blob = new Blob([arrayBuffer], { type: contentType });
+  const file = new File([blob], fileName, { type: contentType });
+
   const telegramFormData = new FormData();
   telegramFormData.append("chat_id", env.TG_Chat_ID);
 
   let apiEndpoint;
-  if (uploadFile.type.startsWith("image/")) {
-    telegramFormData.append("photo", uploadFile);
+  if (contentType.startsWith("image/")) {
+    telegramFormData.append("photo", file);
     apiEndpoint = "sendPhoto";
-  } else if (uploadFile.type.startsWith("audio/")) {
-    telegramFormData.append("audio", uploadFile);
+  } else if (contentType.startsWith("audio/")) {
+    telegramFormData.append("audio", file);
     apiEndpoint = "sendAudio";
-  } else if (uploadFile.type.startsWith("video/")) {
-    telegramFormData.append("video", uploadFile);
+  } else if (contentType.startsWith("video/")) {
+    telegramFormData.append("video", file);
     apiEndpoint = "sendVideo";
   } else {
-    telegramFormData.append("document", uploadFile);
+    telegramFormData.append("document", file);
     apiEndpoint = "sendDocument";
   }
 
@@ -271,7 +273,7 @@ async function uploadToTelegramStorage(
         Label: "None",
         liked: false,
         fileName: fileName,
-        fileSize: uploadFile.size,
+        fileSize: size,
         storageType: "telegram",
         telegramMessageId: messageId || undefined,
       },
@@ -384,15 +386,16 @@ async function sendToTelegram(formData, apiEndpoint, env, retryCount = 0) {
 }
 
 // --- R2 上传 ---
-async function uploadToR2(file, fileName, fileExtension, env) {
+async function uploadToR2(fileInfo, env) {
+  const { arrayBuffer, fileName, fileExtension, contentType, size } = fileInfo;
+  
   try {
     const fileId = `r2_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const objectKey = `${fileId}.${fileExtension}`;
-    const arrayBuffer = await file.arrayBuffer();
 
     await env.R2_BUCKET.put(objectKey, arrayBuffer, {
-      httpMetadata: { contentType: file.type },
-      customMetadata: { fileName: fileName, uploadTime: Date.now().toString() },
+      httpMetadata: { contentType },
+      customMetadata: { fileName, uploadTime: Date.now().toString() },
     });
 
     if (env.img_url) {
@@ -402,8 +405,8 @@ async function uploadToR2(file, fileName, fileExtension, env) {
           ListType: "None",
           Label: "None",
           liked: false,
-          fileName: fileName,
-          fileSize: file.size,
+          fileName,
+          fileSize: size,
           storageType: "r2",
           r2Key: objectKey,
         },
@@ -421,15 +424,16 @@ async function uploadToR2(file, fileName, fileExtension, env) {
 }
 
 // --- S3 上传 ---
-async function uploadToS3(file, fileName, fileExtension, env) {
+async function uploadToS3(fileInfo, env) {
+  const { arrayBuffer, fileName, fileExtension, contentType, size } = fileInfo;
+  
   try {
     const s3 = createS3Client(env);
     const fileId = `s3_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const objectKey = `${fileId}.${fileExtension}`;
-    const arrayBuffer = await file.arrayBuffer();
 
     await s3.putObject(objectKey, arrayBuffer, {
-      contentType: file.type || "application/octet-stream",
+      contentType: contentType || "application/octet-stream",
       metadata: {
         "x-amz-meta-filename": fileName,
         "x-amz-meta-uploadtime": Date.now().toString(),
@@ -443,8 +447,8 @@ async function uploadToS3(file, fileName, fileExtension, env) {
           ListType: "None",
           Label: "None",
           liked: false,
-          fileName: fileName,
-          fileSize: file.size,
+          fileName,
+          fileSize: size,
           storageType: "s3",
           s3Key: objectKey,
         },
@@ -462,10 +466,11 @@ async function uploadToS3(file, fileName, fileExtension, env) {
 }
 
 // --- Discord 上传 ---
-async function uploadToDiscordStorage(file, fileName, fileExtension, env) {
+async function uploadToDiscordStorage(fileInfo, env) {
+  const { arrayBuffer, fileName, fileExtension, contentType, size } = fileInfo;
+  
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const result = await uploadToDiscord(arrayBuffer, fileName, file.type, env);
+    const result = await uploadToDiscord(arrayBuffer, fileName, contentType, env);
 
     if (!result.success) {
       return errorResponse("Discord 上传失败: " + result.error);
@@ -481,8 +486,8 @@ async function uploadToDiscordStorage(file, fileName, fileExtension, env) {
           ListType: "None",
           Label: "None",
           liked: false,
-          fileName: fileName,
-          fileSize: file.size,
+          fileName,
+          fileSize: size,
           storageType: "discord",
           discordChannelId: result.channelId,
           discordMessageId: result.messageId,
@@ -502,18 +507,14 @@ async function uploadToDiscordStorage(file, fileName, fileExtension, env) {
 }
 
 // --- HuggingFace 上传 ---
-async function uploadToHFStorage(file, fileName, fileExtension, env) {
+async function uploadToHFStorage(fileInfo, env) {
+  const { arrayBuffer, fileName, fileExtension, size } = fileInfo;
+  
   try {
-    const arrayBuffer = await file.arrayBuffer();
     const fileId = `hf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const hfPath = `uploads/${fileId}.${fileExtension}`;
 
-    const result = await uploadToHuggingFace(
-      arrayBuffer,
-      hfPath,
-      fileName,
-      env,
-    );
+    const result = await uploadToHuggingFace(arrayBuffer, hfPath, fileName, env);
 
     if (!result.success) {
       return errorResponse("HuggingFace 上传失败: " + result.error);
@@ -528,10 +529,10 @@ async function uploadToHFStorage(file, fileName, fileExtension, env) {
           ListType: "None",
           Label: "None",
           liked: false,
-          fileName: fileName,
-          fileSize: file.size,
+          fileName,
+          fileSize: size,
           storageType: "huggingface",
-          hfPath: hfPath,
+          hfPath,
         },
       });
     }
