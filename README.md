@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="logo.png" alt="K-Vault Logo" width="140">
+
 # K-Vault
 
 > 免费图片/文件托管解决方案，基于 Cloudflare Pages，支持多种存储后端
