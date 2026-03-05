@@ -8,7 +8,7 @@
   <link rel="apple-touch-icon" href="/logo.png">
   <link rel="shortcut icon" href="/favicon.ico">
   <link rel="stylesheet" href="/theme.css">
-  <script src="/theme.js"></script>
+  <script src="/theme.js?v=20260305"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css">
   <style>
     :root {
@@ -468,7 +468,7 @@
   </style>
   <link rel="stylesheet" href="/mobile-refactor.css">
 </head>
-<body>
+<body class="login-page">
   <!-- 背景图层 (通过JS动态控制) -->
   <div class="bg-image-layer" id="bgImageLayer" style="display: none;"></div>
   <div class="bg-overlay" id="bgOverlay" style="display: none;"></div>
@@ -528,6 +528,16 @@
   <script>
     // 加载自定义背景
     (function() {
+      if (
+        window.UIDesignManager &&
+        typeof window.UIDesignManager.syncFromServer === 'function'
+      ) {
+        window.UIDesignManager.syncFromServer({
+          silent: true,
+          applyLocalOnFailure: true
+        });
+        return;
+      }
       const bgMode = localStorage.getItem('loginBackgroundMode') || 'gradient';
       const bgUrl = localStorage.getItem('loginBackgroundUrl') || '';
       const bgLayer = document.getElementById('bgImageLayer');

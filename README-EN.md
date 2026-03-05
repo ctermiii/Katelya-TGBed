@@ -4,7 +4,7 @@
 
 # K-Vault
 
-> Free image/file hosting solution based on Cloudflare Pages, with support for multiple storage backends.
+> Free image/file hosting solution with dual deployment modes (Cloudflare Pages + Docker), supporting multiple storage backends.
 
 **English** | [中文](README.md)
 
@@ -20,24 +20,15 @@
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td width="50%">
-      <img src="demo/登录页面.webp" alt="Login Page" style="width:100%">
-    </td>
-    <td width="50%">
-      <img src="demo/首页上传.webp" alt="Home Upload" style="width:100%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="demo/后台面板.webp" alt="Admin Dashboard" style="width:100%">
-    </td>
-    <td width="50%">
-      <img src="demo/视频预览.webp" alt="Video Preview" style="width:100%">
-    </td>
-  </tr>
-</table>
+<p align="center">
+   <img src="demo/登录页面.webp" alt="Login Page" width="300" />
+   <img src="demo/首页上传页面.webp" alt="Home Upload Page" width="300" />
+   <img src="demo/后台管理页面.webp" alt="Admin Page" width="300" />
+</p>
+<p align="center">
+   <img src="demo/图片浏览页面.webp" alt="Image Browse Page" width="300" />
+   <img src="demo/WebDAV页面.webp" alt="WebDAV Page" width="300" />
+</p>
 
 ## Features
 
@@ -54,6 +45,35 @@
 - **Guest Upload** - Optional guest upload with file size and daily upload limits
 - **Multiple Views** - Grid, list, and waterfall management views
 - **Storage Classification** - Clearly distinguishes files from different storage backends
+- **Dual Deployment Modes** - Keep Cloudflare Pages deployment, and add Docker self-host deployment (`docker compose up -d`)
+- **Dynamic Storage Config Management** - Add/Edit/Delete/Test storage configs and switch default storage via admin API
+- **Pluggable Settings Store (Docker)** - Basic app settings can use `sqlite` (default) or Redis protocol backends (Upstash / Redis / KVrocks)
+- **Simplified Frontend** - Root pages remain the primary UX for upload/admin deployment.
+- **GitHub Actions Docker Build** - Auto-build/push `api` + `web` images on main/tag push
+
+### 2026-03 Product Update
+
+- Admin and folder console are now on root page (`/admin.html`) with:
+  - folder tree + breadcrumbs
+  - file/folder operations (create, rename, move, delete, batch actions)
+  - drag upload queue (progress, retry, cancel)
+  - direct link + signed share link copy
+- Storage capability cards now keep all adapters visible (configured or not) with explicit status/hints.
+- Existing direct links (`/file/:id`) remain compatible.
+
+### Cloudflare Pages (No Dashboard Build Setting Changes)
+
+A lightweight workflow note is included in `.github/workflows/pages-deploy.yml`.
+
+- No Cloudflare API secrets are required in this repository by default.
+- Recommended deployment path is Cloudflare Pages Git integration (connect your fork directly in Cloudflare Dashboard).
+- If you want CLI deployment, run Wrangler locally with your own credentials.
+
+Recommended architecture for multi-cloud mounts:
+
+- Use `WebDAV` adapter in K-Vault as a mounted entry.
+- Use `alist/openlist` as aggregation layer for other providers.
+- This keeps K-Vault focused on UX/link/auth while reducing adapter maintenance complexity.
 
 ---
 
@@ -63,6 +83,7 @@
 
 - Cloudflare account
 - Telegram account (if using Telegram storage)
+- Docker + Docker Compose (optional, for self-host deployment)
 
 ### Step 1: Get Telegram Credentials
 
@@ -83,21 +104,59 @@
 
 2. **Create a Pages project**
    - Log in to [Cloudflare Dashboard](https://dash.cloudflare.com)
-   - Go to `Workers and Pages` → `Create Application` → `Pages` → `Connect to Git`
+   - Go to `Workers and Pages` 鈫?`Create Application` 鈫?`Pages` 鈫?`Connect to Git`
    - Select the forked repository and deploy
 
 3. **Configure environment variables**
-   - Go to project `Settings` → `Environment variables`
+   - Go to project `Settings` 鈫?`Environment variables`
    - Add required variables:
 
 | Variable | Description | Required |
 | :--- | :--- | :---: |
-| `TG_Bot_Token` | Telegram Bot Token | ✅ |
-| `TG_Chat_ID` | Telegram channel ID | ✅ |
+| `TG_Bot_Token` | Telegram Bot Token | 鉁?|
+| `TG_Chat_ID` | Telegram channel ID | 鉁?|
+| `TG_BOT_TOKEN` | Telegram Bot Token (Docker/self-host naming) | Optional |
+| `TG_CHAT_ID` | Telegram channel ID (Docker/self-host naming) | Optional |
 | `BASIC_USER` | Admin username | Optional |
 | `BASIC_PASS` | Admin password | Optional |
 
 **Redeploy** - Changes to environment variables require redeployment to take effect
+
+### Step 3: Docker Self-host Deployment (Optional)
+
+If you want to run K-Vault on your own VPS/NAS without Cloudflare Pages runtime:
+
+1. Copy environment template:
+
+```bash
+cp .env.example .env
+```
+
+2. Fill at least these keys in `.env`:
+   - `CONFIG_ENCRYPTION_KEY`
+   - `SESSION_SECRET`
+   - one bootstrap storage config (for example `TG_BOT_TOKEN` + `TG_CHAT_ID`)
+   - optional settings store:
+     - default: `SETTINGS_STORE=sqlite`
+     - Redis mode: `SETTINGS_STORE=redis` and `SETTINGS_REDIS_URL`
+
+3. Start services:
+
+```bash
+docker compose up -d --build
+```
+
+Optional local Redis profile (for settings store):
+
+```bash
+docker compose --profile redis up -d --build
+```
+
+4. Access:
+   - Legacy UI: `http://<host>:8080/`
+   - WebDAV page: `http://<host>:8080/webdav.html`
+
+For full Docker guide, see [README-DOCKER.md](README-DOCKER.md).
 
 ---
 
@@ -164,9 +223,9 @@ After enabling this, Telegram files still write a lightweight KV index by defaul
 
 To enable image management, configure KV:
 
-1. Go to Cloudflare Dashboard → `Workers and Pages` → `KV`
+1. Go to Cloudflare Dashboard 鈫?`Workers and Pages` 鈫?`KV`
 2. Click `Create namespace`, name it `k-vault`
-3. Go to your Pages project → `Settings` → `Functions` → `KV namespace bindings`
+3. Go to your Pages project 鈫?`Settings` 鈫?`Functions` 鈫?`KV namespace bindings`
 4. Add binding: variable name `img_url`, choose the namespace you created
 5. Redeploy the project
 
@@ -175,15 +234,15 @@ To enable image management, configure KV:
 Configure R2 to support uploads up to 100MB:
 
 1. **Create a bucket**
-   - Cloudflare Dashboard → `R2 Object Storage` → `Create bucket`
+   - Cloudflare Dashboard 鈫?`R2 Object Storage` 鈫?`Create bucket`
    - Name it `k-vault-files`
 
 2. **Bind to the project**
-   - Pages project → `Settings` → `Functions` → `R2 bucket bindings`
+   - Pages project 鈫?`Settings` 鈫?`Functions` 鈫?`R2 bucket bindings`
    - Variable name `R2_BUCKET`, choose your bucket
 
 3. **Enable R2**
-   - `Settings` → `Environment variables` → add `USE_R2` = `true`
+   - `Settings` 鈫?`Environment variables` 鈫?add `USE_R2` = `true`
    - Redeploy
 
 ### S3-Compatible Storage (Optional)
@@ -233,7 +292,7 @@ Store files through a Discord channel, supporting both Webhook and Bot modes.
 
 **Webhook deployment (recommended):**
 
-1. In your Discord server, go to channel settings → Integrations → Webhooks
+1. In your Discord server, go to channel settings 鈫?Integrations 鈫?Webhooks
 2. Create a new Webhook and copy the Webhook URL
 3. Add environment variable `DISCORD_WEBHOOK_URL` in Cloudflare Pages
 4. (Recommended) Also create a Discord Bot and set `DISCORD_BOT_TOKEN` for file retrieval and deletion
@@ -243,7 +302,7 @@ Store files through a Discord channel, supporting both Webhook and Bot modes.
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications) and create an application
 2. Create a Bot in the Bot tab and get the token
-3. In OAuth2 → URL Generator, select `bot` scope and grant `Administrator` permission to the Bot
+3. In OAuth2 鈫?URL Generator, select `bot` scope and grant `Administrator` permission to the Bot
 4. Use the generated URL to invite the Bot to your server
 5. Add `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` in Cloudflare Pages
 6. Redeploy
@@ -274,8 +333,8 @@ Use HuggingFace Datasets API to store files. Files are saved to a Dataset reposi
 **Deployment steps:**
 
 1. Register a [HuggingFace](https://huggingface.co) account
-2. Create a new Dataset repository (Settings → New Dataset)
-3. Go to [Settings → Access Tokens](https://huggingface.co/settings/tokens) and create a token (requires Write permission)
+2. Create a new Dataset repository (Settings 鈫?New Dataset)
+3. Go to [Settings 鈫?Access Tokens](https://huggingface.co/settings/tokens) and create a token (requires Write permission)
 4. Add `HF_TOKEN` and `HF_REPO` environment variables in Cloudflare Pages
 5. Redeploy
 
@@ -330,6 +389,26 @@ Allows non-logged-in users to upload files. Site owners can configure whether it
 | `CHUNK_BACKEND` | Chunk temporary storage backend (`auto`/`r2`/`kv`) | `auto` |
 | `disable_telemetry` | Disable telemetry | - |
 
+### Docker Runtime Variables (Self-host Mode)
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `PORT` | API service port inside container | `8787` |
+| `DATA_DIR` | Data directory | `/app/data` |
+| `DB_PATH` | SQLite database path | `/app/data/k-vault.db` |
+| `CHUNK_DIR` | Chunk temp directory | `/app/data/chunks` |
+| `CONFIG_ENCRYPTION_KEY` | Required key for encrypting storage config secrets | - |
+| `SESSION_SECRET` | Session/signing secret (recommended, separate from encryption key) | - |
+| `UPLOAD_MAX_SIZE` | Max upload size in bytes | `104857600` |
+| `UPLOAD_SMALL_FILE_THRESHOLD` | Threshold for direct upload vs chunk strategy | `20971520` |
+| `CHUNK_SIZE` | Chunk upload size in bytes | `5242880` |
+| `DEFAULT_STORAGE_TYPE` | Bootstrap default storage type (`telegram`/`r2`/`s3`/`discord`/`huggingface`) | `telegram` |
+| `SETTINGS_STORE` | Basic app settings backend (`sqlite` or `redis`) | `sqlite` |
+| `SETTINGS_REDIS_URL` | Redis URL for Upstash/Redis/KVrocks (required when `SETTINGS_STORE=redis`) | - |
+| `SETTINGS_REDIS_PREFIX` | Redis key prefix for settings hash | `k-vault` |
+| `SETTINGS_REDIS_CONNECT_TIMEOUT_MS` | Redis connect/ping timeout in milliseconds | `5000` |
+| `WEB_PORT` | Public web port for `docker compose` | `8080` |
+
 ---
 
 ## Pages
@@ -337,6 +416,7 @@ Allows non-logged-in users to upload files. Site owners can configure whether it
 | Page | Path | Description |
 | :--- | :--- | :--- |
 | Home/Upload | `/` | Batch upload, drag-and-drop, paste upload |
+| WebDAV Page | `/webdav.html` | Dedicated WebDAV upload page with root-style UI |
 | Gallery | `/gallery.html` | Image grid browsing |
 | Admin Panel | `/admin.html` | File management, blacklist/whitelist |
 | File Preview | `/preview.html` | Multi-format file preview |
@@ -352,6 +432,7 @@ Allows non-logged-in users to upload files. Site owners can configure whether it
 - KV: 1,000 writes/day, 100,000 reads/day, 1,000 list operations/day
 - Upgrade to a paid plan if exceeded (starting from $5/month)
 - For Telegram-heavy scenarios, signed direct links or low-KV-write mode are recommended to reduce quota pressure
+- In Docker self-host mode, these Cloudflare quotas do not apply to the Node runtime itself (limits depend on your server/storage backend)
 
 **File size limits by storage backend:**
 
@@ -373,8 +454,8 @@ Allows non-logged-in users to upload files. Site owners can configure whether it
 
 | Variable | Description | Required |
 | :--- | :--- | :---: |
-| `TG_Bot_Token` | Telegram Bot Token | ✅ |
-| `TG_Chat_ID` | Telegram channel ID | ✅ |
+| `TG_Bot_Token` | Telegram Bot Token | 鉁?|
+| `TG_Chat_ID` | Telegram channel ID | 鉁?|
 | `CUSTOM_BOT_API_URL` | Self-hosted Telegram Bot API URL | Optional |
 | `PUBLIC_BASE_URL` | Webhook backlink domain | Optional |
 | `TG_WEBHOOK_SECRET` | Telegram Webhook secret | Optional |
@@ -405,12 +486,29 @@ Allows non-logged-in users to upload files. Site owners can configure whether it
 | `ModerateContentApiKey` | Image moderation API key | Optional |
 | `WhiteList_Mode` | Whitelist mode | Optional |
 | `disable_telemetry` | Disable telemetry | Optional |
+| `PORT` | API port in Docker self-host mode | Optional |
+| `DATA_DIR` | Data directory in Docker self-host mode | Optional |
+| `DB_PATH` | SQLite database path in Docker self-host mode | Optional |
+| `CHUNK_DIR` | Chunk temp directory in Docker self-host mode | Optional |
+| `CONFIG_ENCRYPTION_KEY` | Encryption key for storage config secrets (required in Docker mode) | Optional |
+| `SESSION_SECRET` | Session/signing secret in Docker self-host mode | Optional |
+| `UPLOAD_MAX_SIZE` | Max upload size (bytes) in Docker self-host mode | Optional |
+| `UPLOAD_SMALL_FILE_THRESHOLD` | Direct-upload threshold (bytes) in Docker self-host mode | Optional |
+| `CHUNK_SIZE` | Chunk size (bytes) in Docker self-host mode | Optional |
+| `DEFAULT_STORAGE_TYPE` | Bootstrap default storage type in Docker self-host mode | Optional |
+| `SETTINGS_STORE` | Basic app settings backend in Docker mode (`sqlite`/`redis`) | Optional |
+| `SETTINGS_REDIS_URL` | Redis URL in Docker mode (Upstash/Redis/KVrocks) | Optional |
+| `SETTINGS_REDIS_PREFIX` | Redis key prefix for Docker settings store | Optional |
+| `SETTINGS_REDIS_CONNECT_TIMEOUT_MS` | Redis connect/ping timeout in Docker mode (ms) | Optional |
+| `WEB_PORT` | Exposed web port for `docker compose` | Optional |
 
 ---
 
 ## Related Links
 
 - [Cloudflare Pages Documentation](https://developers.cloudflare.com/pages/)
+- [Docker Deployment Guide](README-DOCKER.md)
+- [Docker Image Workflow](.github/workflows/docker-image.yml)
 - [Telegram Bot API](https://core.telegram.org/bots/api)
 - [Telegram Bot API Server (Self-hosted)](https://github.com/tdlib/telegram-bot-api)
 - [Issue Tracker](https://github.com/katelya77/K-Vault/issues)
@@ -434,3 +532,4 @@ MIT License
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=katelya77/K-Vault&type=Date)](https://star-history.com/#katelya77/K-Vault&Date)
+
