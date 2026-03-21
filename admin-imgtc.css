@@ -604,6 +604,11 @@ body {
   color: #fff !important;
 }
 
+.batch-btn-move {
+  background: linear-gradient(135deg, #6f8bff 0%, #94a8ff 100%) !important;
+  color: #fff !important;
+}
+
 .batch-btn-delete {
   background: linear-gradient(135deg, #ff7b7b 0%, #ff9f9f 100%) !important;
   color: #fff !important;
