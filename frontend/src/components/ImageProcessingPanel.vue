@@ -2,7 +2,7 @@
   <section class="image-processing card-lite" :class="{ enabled: modelValue.enabled }">
     <div class="image-processing-head">
       <div>
-        <h3>Image Optimization</h3>
+        <h3>Optional Image Compression</h3>
         <p class="muted">{{ summary }}</p>
       </div>
       <label class="switch-control" title="Enable image optimization before upload">

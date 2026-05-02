@@ -133,6 +133,20 @@
 
     <p v-if="error" class="error">{{ error }}</p>
   </section>
+
+  <UploadPreparationDialog
+    v-if="pendingUploadBatch"
+    v-model:image-processing="imageProcessing"
+    :active-format="activeImageFormat"
+    :batch="pendingUploadBatch"
+    :format-options="imageProcessingFormatOptions"
+    :format-size="formatSize"
+    :summary="imageProcessingSummary"
+    @cancel="cancelPendingUpload"
+    @select-format="selectImageFormat"
+    @upload-original="uploadPendingOriginal"
+    @upload-optimized="uploadPendingOptimized"
+  />
 </template>
 
 <script setup>
@@ -140,8 +154,10 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { apiFetch, getApiBase } from '../api/client';
 import { getDriveTree } from '../api/drive';
 import ImageProcessingPanel from '../components/ImageProcessingPanel.vue';
+import UploadPreparationDialog from '../components/UploadPreparationDialog.vue';
 import { useImageProcessing } from '../composables/useImageProcessing';
 import { STORAGE_TYPES, getStorageLabel, storageEnabledFromStatus } from '../config/storage-definitions';
+import { isImageProcessable } from '../utils/image-processing';
 
 const picker = ref(null);
 const dragActive = ref(false);
@@ -158,6 +174,7 @@ const folderLoading = ref(false);
 const folderLoadError = ref('');
 const folderLoadNotice = ref('');
 const targetFolderPath = ref('');
+const pendingUploadBatch = ref(null);
 
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024;
 const SMALL_FILE_THRESHOLD = 20 * 1024 * 1024;
@@ -278,28 +295,71 @@ function openPicker() {
 
 function handleFilePick(event) {
   const files = Array.from(event.target.files || []);
-  enqueueFiles(files);
+  prepareFilesForUpload(files);
   event.target.value = '';
 }
 
 function handleDrop(event) {
   dragActive.value = false;
   const files = Array.from(event.dataTransfer?.files || []);
-  enqueueFiles(files);
+  prepareFilesForUpload(files);
 }
 
-function enqueueFiles(files) {
+function createUploadContext() {
+  return {
+    storageMode: selectedStorage.value,
+    storageLabel: currentStorageLabel.value,
+    targetFolderPath: targetFolderPath.value,
+  };
+}
+
+function prepareFilesForUpload(files) {
+  if (!files.length) return;
+  const imageCount = files.filter((file) => isImageProcessable(file)).length;
+  const context = createUploadContext();
+
+  if (imageCount > 0) {
+    pendingUploadBatch.value = {
+      files,
+      imageCount,
+      context,
+    };
+    return;
+  }
+
+  enqueueFiles(files, { ...getImageProcessingSnapshot(), enabled: false }, context);
+}
+
+function cancelPendingUpload() {
+  pendingUploadBatch.value = null;
+}
+
+function uploadPendingOriginal() {
+  const batch = pendingUploadBatch.value;
+  if (!batch) return;
+  pendingUploadBatch.value = null;
+  enqueueFiles(batch.files, { ...getImageProcessingSnapshot(), enabled: false }, batch.context);
+}
+
+function uploadPendingOptimized() {
+  const batch = pendingUploadBatch.value;
+  if (!batch) return;
+  pendingUploadBatch.value = null;
+  enqueueFiles(batch.files, { ...getImageProcessingSnapshot(), enabled: true }, batch.context);
+}
+
+function enqueueFiles(files, imageProcessingOptions = getImageProcessingSnapshot(), context = createUploadContext()) {
   for (const file of files) {
     queue.value.push({
       id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
       file,
-      storageMode: selectedStorage.value,
-      storageLabel: currentStorageLabel.value,
-      targetFolderPath: targetFolderPath.value,
+      storageMode: context.storageMode,
+      storageLabel: context.storageLabel,
+      targetFolderPath: context.targetFolderPath,
       progress: 0,
       status: 'pending',
       error: '',
-      imageProcessingOptions: getImageProcessingSnapshot(),
+      imageProcessingOptions: { ...imageProcessingOptions },
       imageProcessingPrepared: false,
       optimizationNote: '',
     });

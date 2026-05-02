@@ -22,7 +22,7 @@ export function useImageProcessing({ formatSize }) {
 
   const imageProcessingSummary = computed(() => {
     if (!imageProcessing.value.enabled) {
-      return 'Off. Files upload without browser-side image changes.';
+      return 'Off by default. You can choose compression after selecting image files.';
     }
 
     const parts = [activeImageFormat.value.label];

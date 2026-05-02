@@ -226,6 +226,20 @@
     <p v-if="message" class="muted">{{ message }}</p>
     <p v-if="error" class="error">{{ error }}</p>
   </section>
+
+  <UploadPreparationDialog
+    v-if="pendingUploadBatch"
+    v-model:image-processing="imageProcessing"
+    :active-format="activeImageFormat"
+    :batch="pendingUploadBatch"
+    :format-options="imageProcessingFormatOptions"
+    :format-size="formatSize"
+    :summary="imageProcessingSummary"
+    @cancel="cancelPendingUpload"
+    @select-format="selectImageFormat"
+    @upload-original="uploadPendingOriginal"
+    @upload-optimized="uploadPendingOptimized"
+  />
 </template>
 
 <script setup>
@@ -243,8 +257,10 @@ import {
   signShareLink,
 } from '../api/drive';
 import ImageProcessingPanel from '../components/ImageProcessingPanel.vue';
+import UploadPreparationDialog from '../components/UploadPreparationDialog.vue';
 import { useImageProcessing } from '../composables/useImageProcessing';
 import { STORAGE_TYPES, getStorageLabel, storageEnabledFromStatus } from '../config/storage-definitions';
+import { isImageProcessable } from '../utils/image-processing';
 
 const picker = ref(null);
 const dragActive = ref(false);
@@ -268,6 +284,7 @@ const viewMode = ref('list');
 const selectedFileIds = ref([]);
 const message = ref('');
 const error = ref('');
+const pendingUploadBatch = ref(null);
 
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024;
 const SMALL_FILE_THRESHOLD = 20 * 1024 * 1024;
@@ -428,14 +445,14 @@ function openPicker() {
 
 function handleFilePick(event) {
   const filesPicked = Array.from(event.target.files || []);
-  enqueueFiles(filesPicked.map((file) => ({ file, relativePath: '' })));
+  prepareItemsForUpload(filesPicked.map((file) => ({ file, relativePath: '' })));
   event.target.value = '';
 }
 
 async function handleDrop(event) {
   dragActive.value = false;
   const dropped = await extractDroppedFiles(event.dataTransfer);
-  enqueueFiles(dropped);
+  prepareItemsForUpload(dropped);
 }
 
 async function extractDroppedFiles(dataTransfer) {
@@ -512,26 +529,71 @@ function joinPath(base, extra) {
   return segments.join('/');
 }
 
-function enqueueFiles(list) {
+function createUploadContext() {
+  return {
+    storageMode: selectedStorage.value,
+    storageLabel: currentStorageLabel.value,
+    currentPath: currentPath.value,
+  };
+}
+
+function prepareItemsForUpload(list) {
+  if (!list.length) return;
+  const imageCount = list.filter((item) => isImageProcessable(item.file)).length;
+  const context = createUploadContext();
+
+  if (imageCount > 0) {
+    pendingUploadBatch.value = {
+      items: list,
+      imageCount,
+      context,
+    };
+    return;
+  }
+
+  enqueueFiles(list, { ...getImageProcessingSnapshot(), enabled: false }, context);
+}
+
+function cancelPendingUpload() {
+  pendingUploadBatch.value = null;
+}
+
+function uploadPendingOriginal() {
+  const batch = pendingUploadBatch.value;
+  if (!batch) return;
+  pendingUploadBatch.value = null;
+  enqueueFiles(batch.items, { ...getImageProcessingSnapshot(), enabled: false }, batch.context);
+}
+
+function uploadPendingOptimized() {
+  const batch = pendingUploadBatch.value;
+  if (!batch) return;
+  pendingUploadBatch.value = null;
+  enqueueFiles(batch.items, { ...getImageProcessingSnapshot(), enabled: true }, batch.context);
+}
+
+function enqueueFiles(list, imageProcessingOptions = getImageProcessingSnapshot(), context = createUploadContext()) {
   for (const item of list) {
     const file = item.file;
     const relativePath = item.relativePath || '';
     const parentPath = relativePath.includes('/')
       ? relativePath.split('/').slice(0, -1).join('/')
       : '';
-    const targetFolderPath = joinPath(currentPath.value, parentPath);
+    const targetFolderPath = joinPath(context.currentPath, parentPath);
 
     queue.value.push({
       id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
       file,
       relativePath,
       targetFolderPath,
+      storageMode: context.storageMode,
+      storageLabel: context.storageLabel,
       progress: 0,
       status: 'pending',
       error: '',
       cancelled: false,
       xhr: null,
-      imageProcessingOptions: getImageProcessingSnapshot(),
+      imageProcessingOptions: { ...imageProcessingOptions },
       imageProcessingPrepared: false,
       optimizationNote: '',
     });
@@ -547,7 +609,7 @@ async function processQueue() {
   try {
     for (const item of queue.value) {
       if (item.status !== 'pending') continue;
-      if (!availableModes.value.some((mode) => mode.type === selectedStorage.value)) {
+      if (!availableModes.value.some((mode) => mode.type === item.storageMode)) {
         item.status = 'error';
         item.error = 'Selected storage is not available.';
         continue;
@@ -647,7 +709,7 @@ function directUpload(item) {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
     formData.append('file', item.file);
-    formData.append('storageMode', selectedStorage.value);
+    formData.append('storageMode', item.storageMode);
     formData.append('folderPath', item.targetFolderPath || '');
 
     const xhr = new XMLHttpRequest();
@@ -707,7 +769,7 @@ async function chunkUpload(item) {
       fileSize: item.file.size,
       fileType: item.file.type,
       totalChunks,
-      storageMode: selectedStorage.value,
+      storageMode: item.storageMode,
       folderPath: item.targetFolderPath || '',
     }),
   });
