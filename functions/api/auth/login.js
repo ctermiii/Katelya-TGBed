@@ -24,7 +24,18 @@ export async function onRequestPost(context) {
     }
 
     const body = await request.json();
-    const { username, password } = body;
+    const username = String(body?.username ?? body?.user ?? '').trim();
+    const password = String(body?.password ?? body?.pass ?? '');
+
+    if (!username || password === '') {
+      return new Response(JSON.stringify({
+        success: false,
+        message: 'Missing username or password.'
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
     // 验证凭据
     if (username === env.BASIC_USER && password === env.BASIC_PASS) {
